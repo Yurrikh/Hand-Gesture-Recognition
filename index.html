@@ -5,14 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Hand Gesture Recognition – MediaPipe</title>
 
-  <!-- ── MediaPipe Hands (CDN) ── -->
-  <!-- Note: camera_utils is NOT used here. We use the native getUserMedia API
-       in script.js instead, which works reliably on GitHub Pages. -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-
   <style>
-    /* Minimal layout – functional only */
     body {
       margin: 0;
       background: #111;
@@ -26,7 +19,6 @@
 
     h1 { font-size: 1.1rem; margin-bottom: 8px; }
 
-    /* Stack the video (hidden) and canvas on top of each other */
     #container {
       position: relative;
       width: 640px;
@@ -34,7 +26,7 @@
     }
 
     video {
-      /* The video feed is used only as input – hide it visually */
+      /* Hidden – used only as input source for MediaPipe */
       display: none;
     }
 
@@ -54,6 +46,12 @@
       text-align: center;
     }
 
+    #status-label {
+      margin-top: 6px;
+      font-size: 0.85rem;
+      color: #aaa;
+    }
+
     #instructions {
       margin-top: 16px;
       font-size: 0.75rem;
@@ -67,18 +65,14 @@
   <h1>MediaPipe Hand Gesture Recognition</h1>
 
   <div id="container">
-    <!-- The webcam stream goes here (hidden – only used as input to MediaPipe) -->
+    <!-- Hidden video – feeds frames into MediaPipe -->
     <video id="input-video" playsinline></video>
-
-    <!-- All drawing (landmarks + connections) happens on this canvas -->
+    <!-- Canvas – where the mirrored image and landmarks are drawn -->
     <canvas id="output-canvas" width="640" height="480"></canvas>
   </div>
 
-  <!-- Shows the detected gesture number in real time -->
   <div id="gesture-label">Gesture: –</div>
-
-  <!-- Shows camera status (requesting / active / error) -->
-  <div id="status-label">Status: Starting…</div>
+  <div id="status-label">Status: Loading scripts…</div>
 
   <div id="instructions">
     <strong>Gestures:</strong><br>
@@ -88,7 +82,30 @@
     No gesture → fingers apart
   </div>
 
-  <!-- Our main logic -->
+  <!--
+    WHY scripts are at the bottom of <body>:
+      Placing them here guarantees the DOM elements above already exist
+      by the time any script runs. This avoids "element not found" errors.
+
+    WHY pinned version numbers:
+      Un-pinned CDN URLs (e.g. @mediapipe/hands without a version) can
+      break silently when the package is updated. Pinned versions are stable.
+
+    onerror: shows a visible message on screen if a CDN fetch fails,
+      making it easy to diagnose network / CORS issues.
+  -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js"
+    crossorigin="anonymous"
+    onerror="document.getElementById('status-label').textContent='ERROR: drawing_utils.js failed to load. Check internet / CORS.'">
+  </script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"
+    crossorigin="anonymous"
+    onerror="document.getElementById('status-label').textContent='ERROR: hands.js failed to load. Check internet / CORS.'">
+  </script>
+
+  <!-- Our logic – must come AFTER the MediaPipe scripts above -->
   <script src="script.js"></script>
 </body>
 </html>
