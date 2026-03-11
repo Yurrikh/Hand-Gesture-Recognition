@@ -1,47 +1,34 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// script.js  –  MediaPipe Hands: landmark drawing + simple gesture detection
+// =============================================================================
+// script.js – MediaPipe Hands: webcam + landmark drawing + gesture detection
 //
-// Camera access uses the native getUserMedia API directly.
-// This is more reliable than the MediaPipe Camera utility on GitHub Pages.
+// Entry point: waits for DOMContentLoaded, then calls startCamera().
+// Camera uses native getUserMedia (no MediaPipe Camera utility dependency).
 //
-// Gestures detected (thumb tip vs. finger tip distance threshold):
-//   Gesture 0 → thumb touching index  finger
-//   Gesture 1 → thumb touching middle finger
-//   Gesture 2 → thumb touching ring   finger
-// ─────────────────────────────────────────────────────────────────────────────
+// Gestures:
+//   0 → thumb tip near index  finger tip
+//   1 → thumb tip near middle finger tip
+//   2 → thumb tip near ring   finger tip
+// =============================================================================
 
-// ── 1. Grab DOM elements ──────────────────────────────────────────────────────
-const videoElement  = document.getElementById("input-video");
-const canvasElement = document.getElementById("output-canvas");
-const canvasCtx     = canvasElement.getContext("2d");
-const gestureLabel  = document.getElementById("gesture-label");
-const statusLabel   = document.getElementById("status-label");
-
-// ── 2. MediaPipe landmark indices we care about ───────────────────────────────
-// Full landmark map: https://developers.google.com/mediapipe/solutions/vision/hand_landmarker
+// ── Landmark indices (from MediaPipe hand model) ──────────────────────────────
 const THUMB_TIP  = 4;
 const INDEX_TIP  = 8;
 const MIDDLE_TIP = 12;
 const RING_TIP   = 16;
 
-// ── 3. Distance threshold (in normalised 0-1 coordinates) ────────────────────
-// If the distance between two landmarks is below this value we call it a "touch".
-// Tweak this if gestures feel too easy or too strict.
+// ── Touch sensitivity ─────────────────────────────────────────────────────────
+// Distance is in normalised [0,1] coords. Increase to make gestures easier to
+// trigger; decrease to make them stricter.
 const TOUCH_THRESHOLD = 0.07;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper: Euclidean distance between two MediaPipe landmarks
-// Each landmark has .x and .y in the range [0, 1]
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Euclidean distance between two landmarks ──────────────────────────────────
 function landmarkDistance(a, b) {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Gesture detection – returns 0, 1, 2 or null (no recognised gesture)
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Gesture detection ─────────────────────────────────────────────────────────
 function detectGesture(landmarks) {
   const thumb  = landmarks[THUMB_TIP];
   const index  = landmarks[INDEX_TIP];
@@ -51,47 +38,36 @@ function detectGesture(landmarks) {
   if (landmarkDistance(thumb, index)  < TOUCH_THRESHOLD) return 0;
   if (landmarkDistance(thumb, middle) < TOUCH_THRESHOLD) return 1;
   if (landmarkDistance(thumb, ring)   < TOUCH_THRESHOLD) return 2;
-
   return null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Called by MediaPipe every time a frame is processed
-// ─────────────────────────────────────────────────────────────────────────────
-function onResults(results) {
+// ── MediaPipe results callback ────────────────────────────────────────────────
+function onResults(results, canvasElement, canvasCtx, gestureLabel) {
   canvasCtx.save();
 
-  // Mirror the canvas horizontally so it behaves like a mirror
+  // Clear and mirror the canvas
   canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
   canvasCtx.translate(canvasElement.width, 0);
   canvasCtx.scale(-1, 1);
 
-  // Draw the current video frame onto the canvas
+  // Draw the video frame
   canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-  // Draw landmarks if a hand was detected
   if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-    const landmarks = results.multiHandLandmarks[0]; // first hand only
+    const landmarks = results.multiHandLandmarks[0];
 
-    // Draw connections (the "bones" of the hand skeleton)
+    // Draw skeleton connections
     drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
-      color: "#00FF00",
-      lineWidth: 3,
+      color: "#00FF00", lineWidth: 3,
     });
 
-    // Draw each landmark dot
+    // Draw landmark dots
     drawLandmarks(canvasCtx, landmarks, {
-      color: "#FF0000",
-      lineWidth: 1,
-      radius: 4,
+      color: "#FF0000", lineWidth: 1, radius: 4,
     });
 
-    // Detect gesture and update the label
     const gesture = detectGesture(landmarks);
-    gestureLabel.textContent = gesture !== null
-      ? `Gesture: ${gesture}`
-      : "Gesture: –";
-
+    gestureLabel.textContent = gesture !== null ? `Gesture: ${gesture}` : "Gesture: –";
   } else {
     gestureLabel.textContent = "Gesture: (no hand)";
   }
@@ -99,72 +75,91 @@ function onResults(results) {
   canvasCtx.restore();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Initialise MediaPipe Hands
-// ─────────────────────────────────────────────────────────────────────────────
-const hands = new Hands({
-  locateFile: (file) =>
-    `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-});
+// ── Main: runs after the full DOM and all scripts are loaded ──────────────────
+window.addEventListener("DOMContentLoaded", () => {
+  const statusLabel   = document.getElementById("status-label");
+  const gestureLabel  = document.getElementById("gesture-label");
+  const videoElement  = document.getElementById("input-video");
+  const canvasElement = document.getElementById("output-canvas");
+  const canvasCtx     = canvasElement.getContext("2d");
 
-hands.setOptions({
-  maxNumHands: 1,
-  modelComplexity: 1,
-  minDetectionConfidence: 0.7,
-  minTrackingConfidence:  0.5,
-});
-
-hands.onResults(onResults);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Start webcam using native getUserMedia (works reliably on GitHub Pages)
-// ─────────────────────────────────────────────────────────────────────────────
-async function startCamera() {
-  statusLabel.textContent = "Status: Requesting camera…";
-
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 640, height: 480 },
-      audio: false,
-    });
-  } catch (err) {
-    statusLabel.textContent = `Status: Camera error – ${err.message}`;
-    console.error("getUserMedia error:", err);
+  // Guard: check that MediaPipe loaded correctly before doing anything
+  if (typeof Hands === "undefined") {
+    statusLabel.textContent = "ERROR: MediaPipe Hands not loaded. Check CDN scripts in index.html.";
+    console.error("Hands is not defined – MediaPipe CDN scripts failed to load.");
     return;
   }
 
-  // Attach the stream to the (hidden) video element
-  videoElement.srcObject = stream;
-
-  // Wait until the video is actually playing before we start sending frames
-  videoElement.onloadedmetadata = () => {
-    videoElement.play();
-    statusLabel.textContent = "Status: Camera active ✓";
-    processFrame();
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main loop – sends one video frame to MediaPipe on every animation frame
-// ─────────────────────────────────────────────────────────────────────────────
-async function processFrame() {
-  // Only send a frame when the video has real pixel data
-  if (videoElement.readyState >= 2) {
-    await hands.send({ image: videoElement });
+  if (typeof drawConnectors === "undefined" || typeof drawLandmarks === "undefined") {
+    statusLabel.textContent = "ERROR: MediaPipe drawing_utils not loaded. Check CDN scripts in index.html.";
+    console.error("drawConnectors / drawLandmarks not defined.");
+    return;
   }
-  // Schedule the next frame
-  requestAnimationFrame(processFrame);
-}
 
-// ── Kick everything off ───────────────────────────────────────────────────────
-startCamera();
+  statusLabel.textContent = "Status: Initialising MediaPipe…";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Flow summary:
-//   startCamera() asks the browser for webcam access via getUserMedia
-//   → on success, video plays and processFrame() loop begins
-//   → each frame is sent to hands.send()
-//   → MediaPipe calls onResults() with landmark data
-//   → onResults() draws skeleton and calls detectGesture()
-// ─────────────────────────────────────────────────────────────────────────────
+  // ── Initialise MediaPipe Hands ──────────────────────────────────────────────
+  const hands = new Hands({
+    locateFile: (file) =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`,
+  });
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.5,
+  });
+
+  hands.onResults((results) =>
+    onResults(results, canvasElement, canvasCtx, gestureLabel)
+  );
+
+  // ── Request webcam access via native getUserMedia ───────────────────────────
+  async function startCamera() {
+    statusLabel.textContent = "Status: Requesting camera permission…";
+
+    // Check if getUserMedia is even available in this browser / context
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      statusLabel.textContent =
+        "ERROR: getUserMedia not available. Use Chrome/Firefox over HTTPS or localhost.";
+      return;
+    }
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480, facingMode: "user" },
+        audio: false,
+      });
+    } catch (err) {
+      // Common errors: NotAllowedError (permission denied), NotFoundError (no camera)
+      statusLabel.textContent = `ERROR: ${err.name} – ${err.message}`;
+      console.error("getUserMedia failed:", err);
+      return;
+    }
+
+    videoElement.srcObject = stream;
+
+    videoElement.onloadedmetadata = () => {
+      videoElement.play();
+      statusLabel.textContent = "Status: Camera active ✓";
+      processFrame();
+    };
+  }
+
+  // ── Frame loop ──────────────────────────────────────────────────────────────
+  async function processFrame() {
+    if (videoElement.readyState >= 2) {
+      try {
+        await hands.send({ image: videoElement });
+      } catch (err) {
+        console.warn("hands.send() error (skipping frame):", err);
+      }
+    }
+    requestAnimationFrame(processFrame);
+  }
+
+  // ── Start ───────────────────────────────────────────────────────────────────
+  startCamera();
+});
