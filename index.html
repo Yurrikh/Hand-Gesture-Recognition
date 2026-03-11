@@ -83,26 +83,24 @@
   </div>
 
   <!--
-    WHY scripts are at the bottom of <body>:
-      Placing them here guarantees the DOM elements above already exist
-      by the time any script runs. This avoids "element not found" errors.
+    Scripts are placed at the BOTTOM of <body> so DOM elements above
+    are guaranteed to exist before any script runs.
 
-    WHY pinned version numbers:
-      Un-pinned CDN URLs (e.g. @mediapipe/hands without a version) can
-      break silently when the package is updated. Pinned versions are stable.
+    Versions are pinned to the exact latest releases on npm:
+      @mediapipe/drawing_utils  →  0.3.1675466124
+      @mediapipe/hands          →  0.4.1675469240
 
-    onerror: shows a visible message on screen if a CDN fetch fails,
-      making it easy to diagnose network / CORS issues.
+    onerror shows a visible on-screen message if a CDN fetch fails.
   -->
   <script
     src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js"
     crossorigin="anonymous"
-    onerror="document.getElementById('status-label').textContent='ERROR: drawing_utils.js failed to load. Check internet / CORS.'">
+    onerror="document.getElementById('status-label').textContent='ERROR: drawing_utils.js failed to load from CDN.'">
   </script>
   <script
-    src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"
     crossorigin="anonymous"
-    onerror="document.getElementById('status-label').textContent='ERROR: hands.js failed to load. Check internet / CORS.'">
+    onerror="document.getElementById('status-label').textContent='ERROR: hands.js failed to load from CDN.'">
   </script>
 
   <!-- Our logic – must come AFTER the MediaPipe scripts above -->
