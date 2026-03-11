@@ -17,8 +17,8 @@ const MIDDLE_TIP = 12;
 const RING_TIP   = 16;
 
 // ── Touch sensitivity ─────────────────────────────────────────────────────────
-// Distance is in normalised [0,1] coords. Increase to make gestures easier to
-// trigger; decrease to make them stricter.
+// Distance is in normalised [0,1] coords.
+// Increase to make gestures easier to trigger; decrease to make them stricter.
 const TOUCH_THRESHOLD = 0.07;
 
 // ── Euclidean distance between two landmarks ──────────────────────────────────
@@ -28,7 +28,7 @@ function landmarkDistance(a, b) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-// ── Gesture detection ─────────────────────────────────────────────────────────
+// ── Gesture detection – returns 0, 1, 2 or null ──────────────────────────────
 function detectGesture(landmarks) {
   const thumb  = landmarks[THUMB_TIP];
   const index  = landmarks[INDEX_TIP];
@@ -45,16 +45,16 @@ function detectGesture(landmarks) {
 function onResults(results, canvasElement, canvasCtx, gestureLabel) {
   canvasCtx.save();
 
-  // Clear and mirror the canvas
+  // Clear canvas and apply horizontal mirror transform
   canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
   canvasCtx.translate(canvasElement.width, 0);
   canvasCtx.scale(-1, 1);
 
-  // Draw the video frame
+  // Draw the video frame onto the canvas
   canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
   if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-    const landmarks = results.multiHandLandmarks[0];
+    const landmarks = results.multiHandLandmarks[0]; // first hand only
 
     // Draw skeleton connections
     drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
@@ -75,7 +75,7 @@ function onResults(results, canvasElement, canvasCtx, gestureLabel) {
   canvasCtx.restore();
 }
 
-// ── Main: runs after the full DOM and all scripts are loaded ──────────────────
+// ── Main – runs after DOM and all scripts are fully loaded ────────────────────
 window.addEventListener("DOMContentLoaded", () => {
   const statusLabel   = document.getElementById("status-label");
   const gestureLabel  = document.getElementById("gesture-label");
@@ -83,13 +83,12 @@ window.addEventListener("DOMContentLoaded", () => {
   const canvasElement = document.getElementById("output-canvas");
   const canvasCtx     = canvasElement.getContext("2d");
 
-  // Guard: check that MediaPipe loaded correctly before doing anything
+  // Guard: verify MediaPipe globals loaded correctly before proceeding
   if (typeof Hands === "undefined") {
     statusLabel.textContent = "ERROR: MediaPipe Hands not loaded. Check CDN scripts in index.html.";
-    console.error("Hands is not defined – MediaPipe CDN scripts failed to load.");
+    console.error("Hands is not defined – MediaPipe CDN script failed.");
     return;
   }
-
   if (typeof drawConnectors === "undefined" || typeof drawLandmarks === "undefined") {
     statusLabel.textContent = "ERROR: MediaPipe drawing_utils not loaded. Check CDN scripts in index.html.";
     console.error("drawConnectors / drawLandmarks not defined.");
@@ -99,9 +98,11 @@ window.addEventListener("DOMContentLoaded", () => {
   statusLabel.textContent = "Status: Initialising MediaPipe…";
 
   // ── Initialise MediaPipe Hands ──────────────────────────────────────────────
+  // locateFile tells MediaPipe where to fetch its WASM and model files from.
+  // The version here MUST match the hands.js version loaded in index.html.
   const hands = new Hands({
     locateFile: (file) =>
-      `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`,
+      `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
   });
 
   hands.setOptions({
@@ -115,14 +116,14 @@ window.addEventListener("DOMContentLoaded", () => {
     onResults(results, canvasElement, canvasCtx, gestureLabel)
   );
 
-  // ── Request webcam access via native getUserMedia ───────────────────────────
+  // ── Request webcam via native getUserMedia ──────────────────────────────────
   async function startCamera() {
     statusLabel.textContent = "Status: Requesting camera permission…";
 
-    // Check if getUserMedia is even available in this browser / context
+    // Check API availability (requires HTTPS or localhost)
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       statusLabel.textContent =
-        "ERROR: getUserMedia not available. Use Chrome/Firefox over HTTPS or localhost.";
+        "ERROR: Camera API unavailable. Page must be served over HTTPS or localhost.";
       return;
     }
 
@@ -133,7 +134,7 @@ window.addEventListener("DOMContentLoaded", () => {
         audio: false,
       });
     } catch (err) {
-      // Common errors: NotAllowedError (permission denied), NotFoundError (no camera)
+      // NotAllowedError = permission denied, NotFoundError = no camera found
       statusLabel.textContent = `ERROR: ${err.name} – ${err.message}`;
       console.error("getUserMedia failed:", err);
       return;
@@ -154,12 +155,22 @@ window.addEventListener("DOMContentLoaded", () => {
       try {
         await hands.send({ image: videoElement });
       } catch (err) {
-        console.warn("hands.send() error (skipping frame):", err);
+        console.warn("hands.send() skipped a frame:", err);
       }
     }
     requestAnimationFrame(processFrame);
   }
 
-  // ── Start ───────────────────────────────────────────────────────────────────
+  // ── Go! ─────────────────────────────────────────────────────────────────────
   startCamera();
 });
+
+// =============================================================================
+// Flow summary:
+//   DOMContentLoaded fires
+//   → guard checks confirm MediaPipe loaded
+//   → startCamera() calls getUserMedia → browser shows permission popup
+//   → on approval, video plays and processFrame() loop begins
+//   → each frame sent to hands.send() → MediaPipe calls onResults()
+//   → onResults() draws skeleton + calls detectGesture() + updates label
+// =============================================================================
