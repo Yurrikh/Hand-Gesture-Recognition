@@ -6,7 +6,8 @@
   <title>Hand Gesture Recognition – MediaPipe</title>
 
   <!-- ── MediaPipe Hands (CDN) ── -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <!-- Note: camera_utils is NOT used here. We use the native getUserMedia API
+       in script.js instead, which works reliably on GitHub Pages. -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
@@ -75,6 +76,9 @@
 
   <!-- Shows the detected gesture number in real time -->
   <div id="gesture-label">Gesture: –</div>
+
+  <!-- Shows camera status (requesting / active / error) -->
+  <div id="status-label">Status: Starting…</div>
 
   <div id="instructions">
     <strong>Gestures:</strong><br>
