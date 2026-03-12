@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hand Gesture → ESP32 LED</title>
+
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: #fff;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+    }
+
+    h1 { font-size: 1.1rem; margin-bottom: 8px; }
+
+    #container {
+      position: relative;
+      width: 640px;
+      height: 480px;
+    }
+
+    video  { display: none; }
+
+    canvas {
+      position: absolute;
+      top: 0; left: 0;
+      border: 2px solid #444;
+    }
+
+    /* ── Info panel below the canvas ── */
+    #info-panel {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      width: 640px;
+    }
+
+    .info-box {
+      background: #222;
+      border-radius: 6px;
+      padding: 10px 16px;
+      text-align: center;
+    }
+
+    .info-box .label {
+      font-size: 0.7rem;
+      color: #888;
+      margin-bottom: 4px;
+    }
+
+    .info-box .value {
+      font-size: 1.4rem;
+    }
+
+    /* Gesture box spans full width */
+    #box-gesture {
+      grid-column: 1 / -1;
+      border: 2px solid #444;
+      transition: border-color 0.1s;
+    }
+
+    #box-gesture.active {
+      border-color: #00ff88;
+    }
+
+    /* LED status box colour changes based on state */
+    #box-led {
+      grid-column: 1 / -1;
+      border: 2px solid #444;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    #box-led.led-on    { background: #2a4a2a; border-color: #00ff88; }
+    #box-led.led-off   { background: #222;    border-color: #444; }
+    #box-led.led-blink { background: #4a4a1a; border-color: #ffee00; }
+
+    /* BLE controls */
+    #ble-panel {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 640px;
+    }
+
+    #btn-connect {
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 20px;
+      font-family: monospace;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    #btn-connect:disabled { background: #444; cursor: default; }
+
+    #ble-status  { font-size: 0.8rem; color: #aaa; }
+
+    #status-label {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #aaa;
+      width: 640px;
+    }
+
+    #instructions {
+      margin-top: 12px;
+      font-size: 0.75rem;
+      color: #666;
+      max-width: 640px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <h1>Hand Gesture → ESP32 LED Control</h1>
+
+  <div id="container">
+    <video id="input-video" playsinline></video>
+    <canvas id="output-canvas" width="640" height="480"></canvas>
+  </div>
+
+  <!-- ── Info panel ── -->
+  <div id="info-panel">
+
+    <!-- Detected camera gesture -->
+    <div class="info-box" id="box-gesture">
+      <div class="label">CAMERA GESTURE</div>
+      <div class="value" id="label-gesture">–</div>
+    </div>
+
+    <!-- ESP32 LED state feedback -->
+    <div class="info-box led-off" id="box-led">
+      <div class="label">ESP32 LED STATE</div>
+      <div class="value" id="label-led">–</div>
+    </div>
+
+  </div>
+
+  <!-- ── BLE connect button ── -->
+  <div id="ble-panel">
+    <button id="btn-connect">Connect ESP32 via BLE</button>
+    <span id="ble-status">Not connected</span>
+  </div>
+
+  <div id="status-label">Status: Loading scripts…</div>
+
+  <div id="instructions">
+    <strong>Gesture → LED mapping:</strong><br>
+    Gesture 0 (thumb + index)  → ESP32 LED blinks 5× every 0.5s<br>
+    Gesture 1 (thumb + middle) → ESP32 LED turns OFF<br>
+    Gesture 2 (thumb + ring)   → ESP32 LED turns ON<br><br>
+    <strong>Note:</strong> Gesture is sent to ESP32 only when it changes, not every frame.
+  </div>
+
+  <!-- MediaPipe CDN – pinned versions, loaded at bottom of body -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js"
+    crossorigin="anonymous"
+    onerror="document.getElementById('status-label').textContent='ERROR: drawing_utils.js failed to load from CDN.'">
+  </script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"
+    crossorigin="anonymous"
+    onerror="document.getElementById('status-label').textContent='ERROR: hands.js failed to load from CDN.'">
+  </script>
+
+  <script src="camera_test.js"></script>
+
+  <script>
+    // =========================================================================
+    // BLE + gesture-to-LED logic
+    // Kept in a single inline script to avoid extra files for this test.
+    //
+    // Protocol: browser WRITES a single byte to the ESP32 characteristic:
+    //   "0" → blink 5 times
+    //   "1" → LED off
+    //   "2" → LED on
+    // =========================================================================
+
+    // ── BLE UUIDs – must match main.py ───────────────────────────────────────
+    // We reuse the same UUIDs but now the characteristic is WRITE not NOTIFY.
+    const SERVICE_UUID        = "12345678-1234-1234-1234-123456789abc";
+    const CHARACTERISTIC_UUID = "abcd1234-ab12-ab12-ab12-abcdef123456";
+
+    // ── DOM refs ──────────────────────────────────────────────────────────────
+    const btnConnect   = document.getElementById("btn-connect");
+    const bleStatus    = document.getElementById("ble-status");
+    const labelGesture = document.getElementById("label-gesture");
+    const labelLed     = document.getElementById("label-led");
+    const boxGesture   = document.getElementById("box-gesture");
+    const boxLed       = document.getElementById("box-led");
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    let bleCharacteristic = null;   // set after BLE connects
+    let lastGesture       = -1;     // track last sent gesture to avoid spam
+
+    // ── LED display helper ────────────────────────────────────────────────────
+    function updateLedDisplay(gesture) {
+      boxLed.classList.remove("led-on", "led-off", "led-blink");
+      if (gesture === 0) {
+        boxLed.classList.add("led-blink");
+        labelLed.textContent = "BLINKING ×5";
+      } else if (gesture === 1) {
+        boxLed.classList.add("led-off");
+        labelLed.textContent = "OFF";
+      } else if (gesture === 2) {
+        boxLed.classList.add("led-on");
+        labelLed.textContent = "ON";
+      }
+    }
+
+    // ── Send gesture to ESP32 over BLE ───────────────────────────────────────
+    async function sendGesture(gesture) {
+      if (!bleCharacteristic) return;
+      try {
+        // Encode gesture number as a single UTF-8 byte string "0", "1", or "2"
+        const payload = new TextEncoder().encode(String(gesture));
+        await bleCharacteristic.writeValue(payload);
+        updateLedDisplay(gesture);
+      } catch (err) {
+        console.warn("BLE write failed:", err);
+        bleStatus.textContent = `BLE write error: ${err.message}`;
+      }
+    }
+
+    // ── Gesture polling loop ──────────────────────────────────────────────────
+    // Checks window.cameraGesture (set by camera_test.js) every frame.
+    // Only sends a BLE command when the gesture CHANGES to avoid flooding.
+    function gestureLoop() {
+      const gesture = window.cameraGesture; // null or 0/1/2
+
+      // Update gesture display
+      if (gesture !== null) {
+        labelGesture.textContent = `Gesture ${gesture}`;
+        boxGesture.classList.add("active");
+      } else {
+        labelGesture.textContent = "–";
+        boxGesture.classList.remove("active");
+      }
+
+      // Only send to ESP32 if gesture changed and BLE is connected
+      if (gesture !== null && gesture !== lastGesture && bleCharacteristic) {
+        lastGesture = gesture;
+        sendGesture(gesture);
+      }
+
+      // Reset lastGesture when hand leaves frame so same gesture re-triggers
+      if (gesture === null) lastGesture = -1;
+
+      requestAnimationFrame(gestureLoop);
+    }
+
+    // ── BLE connect ───────────────────────────────────────────────────────────
+    async function connectBLE() {
+      if (!navigator.bluetooth) {
+        bleStatus.textContent = "ERROR: Web Bluetooth not supported.";
+        return;
+      }
+
+      bleStatus.textContent = "Scanning for ESP32…";
+      btnConnect.disabled   = true;
+
+      try {
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [{ services: [SERVICE_UUID] }],
+        });
+
+        device.addEventListener("gattserverdisconnected", () => {
+          bleCharacteristic   = null;
+          bleStatus.textContent  = "Disconnected";
+          btnConnect.textContent = "Connect ESP32 via BLE";
+          btnConnect.disabled    = false;
+          btnConnect.onclick     = connectBLE;
+          boxLed.className       = "info-box led-off";
+          labelLed.textContent   = "–";
+        });
+
+        const server         = await device.gatt.connect();
+        const service        = await server.getPrimaryService(SERVICE_UUID);
+        bleCharacteristic    = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+        bleStatus.textContent  = `Connected to ${device.name || "ESP32"} ✓`;
+        btnConnect.textContent = "Disconnect";
+        btnConnect.disabled    = false;
+        btnConnect.onclick     = () => device.gatt.disconnect();
+
+      } catch (err) {
+        bleStatus.textContent = `Error: ${err.message}`;
+        btnConnect.disabled   = false;
+        console.error("BLE error:", err);
+      }
+    }
+
+    // ── Start everything after DOM is ready ───────────────────────────────────
+    window.addEventListener("DOMContentLoaded", () => {
+      btnConnect.onclick = connectBLE;
+      requestAnimationFrame(gestureLoop);
+    });
+  </script>
+</body>
+</html>
