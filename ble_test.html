@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BLE Test – ESP32 Counter</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: #fff;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      gap: 16px;
+    }
+
+    h1 { font-size: 1rem; color: #aaa; margin: 0; }
+
+    /* Big number display */
+    #counter-display {
+      font-size: 6rem;
+      background: #222;
+      border: 2px solid #444;
+      border-radius: 12px;
+      padding: 20px 60px;
+      min-width: 200px;
+      text-align: center;
+      transition: border-color 0.1s;
+    }
+
+    /* Lights up green border when data is received */
+    #counter-display.receiving {
+      border-color: #00ff88;
+    }
+
+    #status {
+      font-size: 0.85rem;
+      color: #aaa;
+    }
+
+    #log {
+      font-size: 0.75rem;
+      color: #666;
+      height: 120px;
+      overflow-y: auto;
+      width: 360px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 8px;
+    }
+
+    button {
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 28px;
+      font-family: monospace;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      background: #444;
+      cursor: default;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>ESP32 BLE Counter Test</h1>
+
+  <!-- Shows the number received from ESP32 -->
+  <div id="counter-display">–</div>
+
+  <div id="status">Not connected</div>
+
+  <button id="btn-connect">Connect ESP32 via BLE</button>
+
+  <!-- Scrolling log of received values -->
+  <div id="log">Waiting for connection…</div>
+
+  <script>
+    // ── BLE UUIDs – must match main.py exactly ──────────────────────────────
+    const SERVICE_UUID        = "12345678-1234-1234-1234-123456789abc";
+    const CHARACTERISTIC_UUID = "abcd1234-ab12-ab12-ab12-abcdef123456";
+
+    // ── DOM refs ────────────────────────────────────────────────────────────
+    const btnConnect     = document.getElementById("btn-connect");
+    const counterDisplay = document.getElementById("counter-display");
+    const statusEl       = document.getElementById("status");
+    const logEl          = document.getElementById("log");
+
+    // ── Log helper ──────────────────────────────────────────────────────────
+    function log(msg) {
+      const line = document.createElement("div");
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.appendChild(line);
+      // Auto-scroll to bottom
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // ── Flash green border briefly when data arrives ─────────────────────────
+    let flashTimer = null;
+    function flashDisplay() {
+      counterDisplay.classList.add("receiving");
+      clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => {
+        counterDisplay.classList.remove("receiving");
+      }, 300);
+    }
+
+    // ── Handle incoming BLE notification ────────────────────────────────────
+    function handleData(event) {
+      const decoder = new TextDecoder("utf-8");
+      const value   = decoder.decode(event.target.value).trim();
+
+      counterDisplay.textContent = value;
+      flashDisplay();
+      log(`Received: ${value}`);
+    }
+
+    // ── Connect to ESP32 ────────────────────────────────────────────────────
+    async function connectBLE() {
+      // Web Bluetooth only works on HTTPS or localhost
+      if (!navigator.bluetooth) {
+        statusEl.textContent = "ERROR: Web Bluetooth not supported. Use Chromium over HTTPS or localhost.";
+        return;
+      }
+
+      statusEl.textContent  = "Scanning for ESP32-TEST…";
+      btnConnect.disabled   = true;
+      logEl.innerHTML       = "";
+      log("Scanning…");
+
+      let device, characteristic;
+
+      try {
+        // Open browser BLE picker, filtered to our service UUID
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ services: [SERVICE_UUID] }],
+        });
+
+        log(`Found device: ${device.name || "unknown"}`);
+        statusEl.textContent = `Found: ${device.name} – connecting…`;
+
+        // Disconnect handler
+        device.addEventListener("gattserverdisconnected", () => {
+          statusEl.textContent   = "Disconnected";
+          counterDisplay.textContent = "–";
+          btnConnect.textContent = "Connect ESP32 via BLE";
+          btnConnect.disabled    = false;
+          btnConnect.onclick     = connectBLE;
+          log("Disconnected from ESP32");
+        });
+
+        // Connect to GATT → service → characteristic
+        const server = await device.gatt.connect();
+        log("GATT connected");
+
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        log("Service found");
+
+        characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+        log("Characteristic found");
+
+        // Subscribe to notifications
+        await characteristic.startNotifications();
+        characteristic.addEventListener("characteristicvaluechanged", handleData);
+        log("Notifications enabled – waiting for data…");
+
+        statusEl.textContent   = `Connected to ${device.name} ✓`;
+        btnConnect.textContent = "Disconnect";
+        btnConnect.disabled    = false;
+        btnConnect.onclick     = () => device.gatt.disconnect();
+
+      } catch (err) {
+        // User cancelled picker or connection failed
+        statusEl.textContent = `Error: ${err.message}`;
+        btnConnect.disabled  = false;
+        log(`ERROR: ${err.message}`);
+        console.error("BLE error:", err);
+      }
+    }
+
+    // ── Wire up button ──────────────────────────────────────────────────────
+    btnConnect.onclick = connectBLE;
+  </script>
+</body>
+</html>
