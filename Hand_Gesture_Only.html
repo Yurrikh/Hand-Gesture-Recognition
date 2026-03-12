@@ -225,7 +225,8 @@
       try {
         // Encode gesture number as a single UTF-8 byte string "0", "1", or "2"
         const payload = new TextEncoder().encode(String(gesture));
-        await bleCharacteristic.writeValue(payload);
+        // writeValueWithoutResponse matches write_no_response=True on ESP32
+        await bleCharacteristic.writeValueWithoutResponse(payload);
         updateLedDisplay(gesture);
       } catch (err) {
         console.warn("BLE write failed:", err);
