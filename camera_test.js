@@ -1,33 +1,33 @@
 // =============================================================================
 // camera_test.js – MediaPipe Hands: webcam + landmark drawing + gesture detection
 //
-// Entry point: waits for DOMContentLoaded, then calls startCamera().
-// Camera uses native getUserMedia (no MediaPipe Camera utility dependency).
+// This file is responsible ONLY for camera logic.
+// It writes the current detected gesture to window.cameraGesture so that
+// app.js can read it and combine it with the EMG signal.
 //
 // Gestures:
 //   0 → thumb tip near index  finger tip
 //   1 → thumb tip near middle finger tip
 //   2 → thumb tip near ring   finger tip
-//
-// KEY FIX: gesture threshold is now RELATIVE to hand size, not a fixed number.
-// This means detection works correctly whether your hand is close or far away.
 // =============================================================================
 
-// ── Landmark indices (from MediaPipe hand model) ──────────────────────────────
-const THUMB_TIP   = 4;
-const INDEX_TIP   = 8;
-const MIDDLE_TIP  = 12;
-const RING_TIP    = 16;
-const WRIST       = 0;   // used as reference point for hand size
-const MID_MCP     = 9;   // middle finger knuckle – stable base landmark
+// ── Shared state – read by app.js ─────────────────────────────────────────────
+// null  = no gesture detected
+// 0/1/2 = gesture number
+window.cameraGesture = null;
+
+// ── Landmark indices ──────────────────────────────────────────────────────────
+const THUMB_TIP  = 4;
+const INDEX_TIP  = 8;
+const MIDDLE_TIP = 12;
+const RING_TIP   = 16;
+const WRIST      = 0;
+const MID_MCP    = 9;
 
 // ── Relative touch sensitivity ────────────────────────────────────────────────
-// The actual threshold = TOUCH_RATIO * handSize (measured each frame).
-// This makes detection scale-invariant: works at any distance from the camera.
-//
-// How to tune:
-//   Too many false gestures  → lower this value (e.g. 0.25)
-//   Gesture too hard to trigger → raise this value (e.g. 0.35)
+// Threshold = TOUCH_RATIO × handSize (measured each frame).
+// This makes detection work at any distance from the camera.
+// Tune: lower = stricter, higher = easier to trigger.
 const TOUCH_RATIO = 0.30;
 
 // ── Euclidean distance between two landmarks ──────────────────────────────────
@@ -37,19 +37,14 @@ function landmarkDistance(a, b) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-// ── Hand size reference ───────────────────────────────────────────────────────
-// Returns the distance from wrist to middle-finger knuckle.
-// This value shrinks when the hand is far away and grows when it is close,
-// so using it as a reference makes all other distances scale-invariant.
+// ── Hand size: wrist → middle knuckle (stable reference) ─────────────────────
 function getHandSize(landmarks) {
   return landmarkDistance(landmarks[WRIST], landmarks[MID_MCP]);
 }
 
-// ── Gesture detection – returns 0, 1, 2 or null ──────────────────────────────
+// ── Gesture detection ─────────────────────────────────────────────────────────
 function detectGesture(landmarks) {
-  const handSize = getHandSize(landmarks);
-
-  // Dynamic threshold: scales with how big the hand appears on screen
+  const handSize  = getHandSize(landmarks);
   const threshold = TOUCH_RATIO * handSize;
 
   const thumb  = landmarks[THUMB_TIP];
@@ -64,58 +59,53 @@ function detectGesture(landmarks) {
 }
 
 // ── MediaPipe results callback ────────────────────────────────────────────────
-function onResults(results, canvasElement, canvasCtx, gestureLabel, statusLabel) {
+function onResults(results, canvasElement, canvasCtx, statusLabel) {
   canvasCtx.save();
 
-  // Clear canvas and apply horizontal mirror transform
   canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
   canvasCtx.translate(canvasElement.width, 0);
   canvasCtx.scale(-1, 1);
 
-  // Draw the video frame onto the canvas
   canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
   if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-    const landmarks = results.multiHandLandmarks[0]; // first hand only
+    const landmarks = results.multiHandLandmarks[0];
 
-    // Draw skeleton connections
     drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
       color: "#00FF00", lineWidth: 3,
     });
-
-    // Draw landmark dots
     drawLandmarks(canvasCtx, landmarks, {
       color: "#FF0000", lineWidth: 1, radius: 4,
     });
 
-    // Show the current dynamic threshold in the status bar so you can
-    // see it responding to hand distance in real time (useful for tuning)
+    // Write gesture to shared state for app.js to consume
+    window.cameraGesture = detectGesture(landmarks);
+
+    // Show live hand size in status bar (useful for tuning TOUCH_RATIO)
     const handSize  = getHandSize(landmarks);
     const threshold = (TOUCH_RATIO * handSize).toFixed(4);
-    statusLabel.textContent = `Status: Camera active ✓  |  hand size: ${handSize.toFixed(3)}  threshold: ${threshold}`;
+    statusLabel.textContent = `Camera active ✓  |  hand size: ${handSize.toFixed(3)}  threshold: ${threshold}`;
 
-    const gesture = detectGesture(landmarks);
-    gestureLabel.textContent = gesture !== null ? `Gesture: ${gesture}` : "Gesture: –";
   } else {
-    gestureLabel.textContent = "Gesture: (no hand)";
-    statusLabel.textContent  = "Status: Camera active ✓";
+    // No hand visible – clear the shared state
+    window.cameraGesture = null;
+    statusLabel.textContent = "Camera active ✓  |  (no hand in frame)";
   }
 
   canvasCtx.restore();
 }
 
-// ── Main – runs after DOM and all scripts are fully loaded ────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", () => {
   const statusLabel   = document.getElementById("status-label");
-  const gestureLabel  = document.getElementById("gesture-label");
   const videoElement  = document.getElementById("input-video");
   const canvasElement = document.getElementById("output-canvas");
   const canvasCtx     = canvasElement.getContext("2d");
 
-  // Guard: verify MediaPipe globals loaded correctly before proceeding
+  // Guard: make sure MediaPipe loaded from CDN
   if (typeof Hands === "undefined") {
     statusLabel.textContent = "ERROR: MediaPipe Hands not loaded. Check CDN scripts in index.html.";
-    console.error("Hands is not defined – MediaPipe CDN script failed.");
+    console.error("Hands is not defined.");
     return;
   }
   if (typeof drawConnectors === "undefined" || typeof drawLandmarks === "undefined") {
@@ -140,16 +130,16 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   hands.onResults((results) =>
-    onResults(results, canvasElement, canvasCtx, gestureLabel, statusLabel)
+    onResults(results, canvasElement, canvasCtx, statusLabel)
   );
 
-  // ── Request webcam via native getUserMedia ──────────────────────────────────
+  // ── Webcam via getUserMedia ───────────────────────────────────────────────
   async function startCamera() {
     statusLabel.textContent = "Status: Requesting camera permission…";
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       statusLabel.textContent =
-        "ERROR: Camera API unavailable. Page must be served over HTTPS or localhost.";
+        "ERROR: Camera API unavailable. Use HTTPS or localhost.";
       return;
     }
 
@@ -166,7 +156,6 @@ window.addEventListener("DOMContentLoaded", () => {
     }
 
     videoElement.srcObject = stream;
-
     videoElement.onloadedmetadata = () => {
       videoElement.play();
       statusLabel.textContent = "Status: Camera active ✓";
@@ -174,7 +163,7 @@ window.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  // ── Frame loop ──────────────────────────────────────────────────────────────
+  // ── Frame loop ────────────────────────────────────────────────────────────
   async function processFrame() {
     if (videoElement.readyState >= 2) {
       try {
@@ -186,17 +175,5 @@ window.addEventListener("DOMContentLoaded", () => {
     requestAnimationFrame(processFrame);
   }
 
-  // ── Go! ─────────────────────────────────────────────────────────────────────
   startCamera();
 });
-
-// =============================================================================
-// Flow summary:
-//   DOMContentLoaded fires
-//   → guard checks confirm MediaPipe loaded
-//   → startCamera() calls getUserMedia → browser shows permission popup
-//   → on approval, video plays and processFrame() loop begins
-//   → each frame sent to hands.send() → MediaPipe calls onResults()
-//   → onResults() measures hand size, computes dynamic threshold,
-//     draws skeleton, calls detectGesture(), updates label
-// =============================================================================
