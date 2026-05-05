@@ -209,13 +209,13 @@
       boxLed.classList.remove("led-on", "led-off", "led-blink");
       if (gesture === 0) {
         boxLed.classList.add("led-blink");
-        labelLed.textContent = "BLINKING ×5";
+        labelLed.textContent = "BLINKING ×1";
       } else if (gesture === 1) {
         boxLed.classList.add("led-off");
-        labelLed.textContent = "OFF";
+        labelLed.textContent = "BLINKING x2";
       } else if (gesture === 2) {
         boxLed.classList.add("led-on");
-        labelLed.textContent = "ON";
+        labelLed.textContent = "BLINKING x3";
       }
     }
 
