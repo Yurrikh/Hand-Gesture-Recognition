@@ -380,8 +380,8 @@
       <div class="panel">
         <div class="panel-title">Recording Config</div>
         <div style="font-size:0.72rem;color:var(--dim);line-height:2;">
-          Window <span style="color:var(--text)">
-            <input id="cfg-window" type="number" value="3" min="1" max="10"
+          Pre-trigger <span style="color:var(--text)">
+            <input id="cfg-window" type="number" value="1" min="1" max="10"
               style="width:36px;background:#0a0c0f;border:1px solid var(--border);color:var(--accent);
                      font-family:var(--font-mono);font-size:0.75rem;text-align:center;padding:1px 3px;">
             s</span><br>
@@ -427,9 +427,10 @@
       Gesture 1 = Thumb + Middle &nbsp;|&nbsp;
       Gesture 2 = Thumb + Ring<br>
       <strong>How it works:</strong>
-      When MediaPipe holds a gesture for <em>Min confidence</em> frames, recording starts automatically
-      for <em>Window</em> seconds. A <em>Cooldown</em> period prevents double-triggers.
-      CSV files download automatically to your browser's download folder.
+      EMG data streams continuously into a rolling cyclic buffer.
+      When MediaPipe holds a gesture for <em>Min confidence</em> frames, it instantly snapshots
+      the last <em>Pre-trigger</em> seconds from the buffer — capturing the muscle activation
+      that led up to the gesture. A <em>Cooldown</em> period then blocks re-triggering.
     </div>
 
   </div><!-- /grid -->
@@ -690,29 +691,29 @@
     recBadge.classList.add('active');
     recFlash.classList.add('active');
 
-    addLog(`Recording Gesture ${gestureId} (${GESTURE_NAMES[gestureId]}) for ${windowSec}s…`, 'warn');
+    // ── Cyclic pre-trigger snapshot ───────────────────────────────────────────
+    // Gesture just fired — instantly grab everything in the rolling buffer
+    // that falls within the last `windowSec` seconds. No waiting needed.
+    const triggerTs   = Date.now();
+    const cutoffTs    = triggerTs - (windowSec * 1000);
+    const pre_samples = emgBuffer.filter(s => s.ts >= cutoffTs && s.ts <= triggerTs);
 
-    // Capture a snapshot of the buffer start index
-    const startTs  = Date.now();
-    const deadline = startTs + windowSec * 1000;
+    addLog(`Trigger! Captured ${pre_samples.length} pre-trigger samples (last ${windowSec}s) — Gesture ${gestureId} (${GESTURE_NAMES[gestureId]})`, 'warn');
 
-    // Wait for window to complete
-    await new Promise(r => setTimeout(r, windowSec * 1000));
-
-    // Slice only samples collected during this window
-    const window_samples = emgBuffer.filter(s => s.ts >= startTs && s.ts <= deadline);
+    // Brief visual flash so user sees the trigger fired (100ms)
+    await new Promise(r => setTimeout(r, 100));
 
     recBadge.classList.remove('active');
     recFlash.classList.remove('active');
     isRecording = false;
 
-    if (window_samples.length < 10) {
-      addLog(`Skipped — too few samples (${window_samples.length}). Is BLE streaming?`, 'err');
+    if (pre_samples.length < 10) {
+      addLog(`Skipped — too few samples (${pre_samples.length}). Is BLE streaming?`, 'err');
     } else {
-      saveCSV(gestureId, window_samples);
+      saveCSV(gestureId, pre_samples);
     }
 
-    // Cooldown
+    // Cooldown — blocks re-trigger for cooldownSec seconds
     inCooldown = true;
     addLog(`Cooldown ${cooldownSec}s — next trigger blocked.`, '');
     await new Promise(r => setTimeout(r, cooldownSec * 1000));
